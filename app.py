@@ -1,22 +1,126 @@
-from flask import Flask, jsonify, render_template, request
-import base64
-import datetime
+from flask import Flask, render_template_string, jsonify, request
 import os
-from flask_sqlalchemy import SQLAlchemy
-import requests
-from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
 
-# CONFIGURATION & DATABASE SETUP
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+HTML_DASHBOARD = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beast Online Tasks</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: sans-serif; padding-bottom: 80px; }
+        .navbar-custom { background-color: #1e293b; border-bottom: 1px solid #334155; }
+        .card-custom { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; }
+        .btn-mpesa { background-color: #22c55e; color: white; font-weight: 600; }
+        .task-badge { background-color: #0284c7; color: white; border-radius: 20px; padding: 4px 12px; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark navbar-custom px-3">
+        <a class="navbar-brand fw-bold text-success" href="#"><i class="bi bi-rocket-takeoff-fill"></i> Beast Tasks</a>
+        <button class="btn btn-sm btn-mpesa rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#mpesaModal"><i class="bi bi-wallet2"></i> M-Pesa Deposit</button>
+    </nav>
+    <div class="container mt-4">
+        <div class="card card-custom p-4 mb-4 text-center">
+            <span class="text-secondary small">AVAILABLE BALANCE</span>
+            <h1 class="display-5 fw-bold text-success my-1">KES <span id="userBalance">150.00</span></h1>
+            <div class="d-flex justify-content-center gap-3 mt-3">
+                <button class="btn btn-outline-light btn-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#mpesaModal"><i class="bi bi-plus-circle"></i> Deposit</button>
+                <button class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="alert('Withdrawal request initiated!')"><i class="bi bi-arrow-up-right-circle"></i> Cashout</button>
+            </div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-6">
+                <div class="card card-custom p-3 text-center">
+                    <i class="bi bi-check2-circle text-info fs-3"></i>
+                    <h5 class="fw-bold my-1">12</h5>
+                    <small class="text-secondary">Tasks Done</small>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="card card-custom p-3 text-center">
+                    <i class="bi bi-currency-exchange text-warning fs-3"></i>
+                    <h5 class="fw-bold my-1">KES 1,250</h5>
+                    <small class="text-secondary">Total Earned</small>
+                </div>
+            </div>
+        </div>
+        <h5 class="fw-bold mb-3"><i class="bi bi-list-task text-primary me-2"></i>Available Paid Tasks</h5>
+        <div class="d-flex flex-column gap-3">
+            <div class="card card-custom p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="fw-bold mb-1">Consumer Shopping Habits Survey</h6>
+                        <small class="text-secondary">Est. time: 3 mins • 5 Questions</small>
+                    </div>
+                    <span class="task-badge">+ KES 50.00</span>
+                </div>
+                <button class="btn btn-primary btn-sm mt-3 w-100 rounded-pill" onclick="startTask('Consumer Survey', 50)">Start Survey</button>
+            </div>
+            <div class="card card-custom p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="fw-bold mb-1">Mobile App Usability Review</h6>
+                        <small class="text-secondary">Est. time: 5 mins • Rating & Review</small>
+                    </div>
+                    <span class="task-badge">+ KES 80.00</span>
+                </div>
+                <button class="btn btn-primary btn-sm mt-3 w-100 rounded-pill" onclick="startTask('App Review', 80)">Start Task</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="mpesaModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-success"><i class="bi bi-phone-vibrate me-2"></i>Lipa Na M-Pesa</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="mpesaForm">
+                        <div class="mb-3">
+                            <label class="form-label">M-Pesa Phone Number</label>
+                            <input type="tel" class="form-control bg-secondary text-light border-0" placeholder="e.g. 254712345678" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Amount (KES)</label>
+                            <input type="number" class="form-control bg-secondary text-light border-0" placeholder="100" min="10" required>
+                        </div>
+                        <button type="submit" class="btn btn-mpesa w-100 py-2">Trigger STK Push</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function startTask(taskName, reward) {
+            if (confirm("Start task: " + taskName + " for KES " + reward + "?")) {
+                let currentBal = parseFloat(document.getElementById('userBalance').innerText);
+                document.getElementById('userBalance').innerText = (currentBal + reward).toFixed(2);
+                alert("Task completed! KES " + reward + " added to your balance.");
+            }
+        }
+        document.getElementById('mpesaForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            alert("M-Pesa STK Push prompt sent to your phone!");
+            bootstrap.Modal.getInstance(document.getElementById('mpesaModal')).hide();
+        });
+    </script>
+</body>
+</html>
+"""
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return render_template_string(HTML_DASHBOARD)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
     
