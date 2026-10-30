@@ -1,3 +1,7 @@
+@app.route('/')
+def home():
+    return "<h1>Beast Online Tasks Platform is Live!</h1><p>API status: Running 24/7</p>"
+    
 import base64
 import datetime
 import os
