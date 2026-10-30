@@ -1,3 +1,16 @@
+from flask import Flask, jsonify, render_template, request
+import base64
+import datetime
+import os
+from flask_sqlalchemy import SQLAlchemy
+import requests
+from requests.auth import HTTPBasicAuth
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return render_template('index.html')
 import base64
 import datetime
 import os
