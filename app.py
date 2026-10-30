@@ -32,6 +32,13 @@ def init_db():
 
 init_db()
 
+# Surveys set to 7 KES reward, simple to complex, max 7 questions
+SURVEYS = [
+    {"id": 1, "title": "Level 1: Basic Brand Recognition", "difficulty": "Simple", "reward": 7.0, "questions": 3},
+    {"id": 2, "title": "Level 2: Consumer Shopping Habits", "difficulty": "Medium", "reward": 7.0, "questions": 5},
+    {"id": 3, "title": "Level 3: Advanced Software Usability Audit", "difficulty": "Complex", "reward": 7.0, "questions": 7}
+]
+
 CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', '')
 CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', '')
 BUSINESS_SHORTCODE = os.environ.get('MPESA_SHORTCODE', '174379')
@@ -45,22 +52,26 @@ HTML_PAGE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Beast Online Tasks</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
         body { background-color: #0f172a; color: #f8fafc; font-family: sans-serif; padding-bottom: 50px; }
         .card-custom { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; }
         .btn-mpesa { background-color: #22c55e; color: white; font-weight: bold; }
+        .badge-simple { background-color: #0ea5e9; }
+        .badge-medium { background-color: #eab308; color: #000; }
+        .badge-complex { background-color: #ef4444; }
     </style>
 </head>
 <body>
-<div class="container mt-5" style="max-width: 450px;">
+<div class="container mt-4" style="max-width: 500px;">
     <div class="text-center mb-4">
-        <h2 class="text-success fw-bold">🚀 Beast Tasks</h2>
-        <p class="text-secondary">Earn KES with Simple Online Tasks</p>
+        <h2 class="text-success fw-bold"><i class="bi bi-rocket-takeoff-fill me-2"></i>Beast Tasks</h2>
+        <p class="text-secondary small">Surveys • 7 KES Each • Max 10/Day</p>
     </div>
 
     {% if not session.get('user_id') %}
         <div class="card card-custom p-4">
-            <ul class="nav nav-pills nav-justified mb-3" id="pills-tab" role="tablist">
+            <ul class="nav nav-pills nav-justified mb-3" id="authTab" role="tablist">
                 <li class="nav-item"><button class="nav-link active text-light" data-bs-toggle="pill" data-bs-target="#login">Sign In</button></li>
                 <li class="nav-item"><button class="nav-link text-light" data-bs-toggle="pill" data-bs-target="#register">Register</button></li>
             </ul>
@@ -98,18 +109,51 @@ HTML_PAGE = """
             </div>
         </div>
     {% else %}
-        <div class="card card-custom p-4 text-center">
-            <span class="badge bg-secondary mb-2">ID: {{ user[0] }}</span>
+        <div class="card card-custom p-4 text-center mb-4">
+            <span class="badge bg-secondary mb-1">ID: {{ user[0] }}</span>
             <h4 class="text-uppercase fw-bold text-light">{{ user[1] }}</h4>
             <p class="text-secondary small mb-1">Available Balance</p>
-            <h1 class="text-success fw-bold">KES {{ "%.2f"|format(user[4]) }}</h1>
-            
-            <hr class="border-secondary my-3">
-            
-            <div class="d-grid gap-2">
-                <button class="btn btn-mpesa" data-bs-toggle="modal" data-bs-target="#depositModal">Deposit via M-Pesa</button>
-                <a href="/logout" class="btn btn-outline-danger btn-sm">Sign Out</a>
+            <h1 class="text-success fw-bold">KES <span id="balanceDisplay">{{ "%.2f"|format(user[4]) }}</span></h1>
+            <div class="row mt-3 text-center">
+                <div class="col-6 border-end border-secondary">
+                    <span class="text-info fw-bold fs-5" id="tasksCount">{{ user[5] }}</span>/10
+                    <div class="text-secondary small">Surveys Today</div>
+                </div>
+                <div class="col-6">
+                    <span class="text-warning fw-bold fs-5">KES {{ "%.2f"|format(user[6]) }}</span>
+                    <div class="text-secondary small">Total Earned</div>
+                </div>
             </div>
+            <hr class="border-secondary my-3">
+            <div class="d-flex gap-2">
+                <button class="btn btn-mpesa w-50" data-bs-toggle="modal" data-bs-target="#depositModal"><i class="bi bi-wallet2 me-1"></i> Deposit</button>
+                <a href="/logout" class="btn btn-outline-danger w-50"><i class="bi bi-box-arrow-right me-1"></i> Sign Out</a>
+            </div>
+        </div>
+
+        <h5 class="fw-bold mb-3"><i class="bi bi-layers-fill text-primary me-2"></i>Available Surveys (7 KES Each)</h5>
+        <div class="d-flex flex-column gap-3 mb-4">
+            {% for survey in surveys %}
+            <div class="card card-custom p-3">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <h6 class="fw-bold mb-1">{{ survey.title }}</h6>
+                        <small class="text-secondary">{{ survey.questions }} Questions • Must answer all correctly</small>
+                    </div>
+                    {% if survey.difficulty == 'Simple' %}
+                        <span class="badge badge-simple">Simple</span>
+                    {% elif survey.difficulty == 'Medium' %}
+                        <span class="badge badge-medium">Medium</span>
+                    {% else %}
+                        <span class="badge badge-complex">Complex</span>
+                    {% endif %}
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <span class="text-success fw-bold">+ KES 7.00</span>
+                    <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="runSurvey({{ survey.id }}, '{{ survey.title }}', {{ survey.questions }})">Start Survey</button>
+                </div>
+            </div>
+            {% endfor %}
         </div>
 
         <!-- Deposit Modal -->
@@ -141,6 +185,35 @@ HTML_PAGE = """
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    async function runSurvey(id, title, totalQ) {
+        let correctCount = 0;
+        for(let i = 1; i <= totalQ; i++) {
+            let userAnswer = prompt(`[${title}] Question ${i} of ${totalQ}:\nType 'yes' or 'correct' to answer correctly:`);
+            if(userAnswer === null) return; 
+            if(userAnswer.toLowerCase().trim() === 'yes' || userAnswer.toLowerCase().trim() === 'correct') {
+                correctCount++;
+            }
+        }
+
+        if(correctCount === totalQ) {
+            let res = await fetch('/complete-task', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            });
+            let data = await res.json();
+            if(data.success) {
+                document.getElementById('balanceDisplay').innerText = data.new_balance.toFixed(2);
+                document.getElementById('tasksCount').innerText = data.tasks_done;
+                alert("🎉 Survey completed accurately! KES 7.00 has been added to your balance.");
+            } else {
+                alert(data.message);
+            }
+        } else {
+            alert("❌ Survey failed! Payment is only made for correct survey answers (" + correctCount + "/" + totalQ + " correct). Try again!");
+        }
+    }
+
     const form = document.getElementById('depositForm');
     if(form) {
         form.addEventListener('submit', async (e) => {
@@ -183,7 +256,7 @@ def home():
         cursor.execute("SELECT user_id, name, phone, password, balance, tasks_done, total_earned FROM users WHERE user_id = ?", (user_id,))
         user = cursor.fetchone()
         conn.close()
-    return render_template_string(HTML_PAGE, user=user)
+    return render_template_string(HTML_PAGE, user=user, surveys=SURVEYS)
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -227,6 +300,40 @@ def login():
 def logout():
     session.pop('user_id', None)
     return redirect(url_for('home'))
+
+@app.route('/complete-task', methods=['POST'])
+def complete_task():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    reward = 7.0  # Fixed reward of 7 KES per survey
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT balance, tasks_done, total_earned FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'message': 'User not found'})
+
+    balance, tasks_done, total_earned = row
+
+    if tasks_done >= 10:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Daily limit reached! Maximum of 10 surveys allowed per day.'})
+
+    new_balance = balance + reward
+    new_total = total_earned + reward
+    new_tasks = tasks_done + 1
+
+    cursor.execute("UPDATE users SET balance = ?, tasks_done = ?, total_earned = ? WHERE user_id = ?", 
+                   (new_balance, new_tasks, new_total, user_id))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'new_balance': new_balance, 'tasks_done': new_tasks})
 
 @app.route('/stk-push', methods=['POST'])
 def stk_push():
