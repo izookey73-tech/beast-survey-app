@@ -1,7 +1,18 @@
+
 from flask import Flask, render_template_string, jsonify, request
+import base64
+import datetime
 import os
+import requests
+from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
+
+# Daraja API Configuration (will pull from Render Environment Variables)
+CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'YOUR_CONSUMER_KEY')
+CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'YOUR_CONSUMER_SECRET')
+BUSINESS_SHORTCODE = os.environ.get('MPESA_SHORTCODE', '174379') # Sandbox default
+PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919') # Sandbox default
 
 HTML_DASHBOARD = """
 <!DOCTYPE html>
@@ -74,6 +85,8 @@ HTML_DASHBOARD = """
             </div>
         </div>
     </div>
+    
+    <!-- M-Pesa Modal -->
     <div class="modal fade" id="mpesaModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-dark text-light border-secondary">
@@ -85,13 +98,13 @@ HTML_DASHBOARD = """
                     <form id="mpesaForm">
                         <div class="mb-3">
                             <label class="form-label">M-Pesa Phone Number</label>
-                            <input type="tel" class="form-control bg-secondary text-light border-0" placeholder="e.g. 254712345678" required>
+                            <input type="tel" id="phone" class="form-control bg-secondary text-light border-0" placeholder="254712345678" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Amount (KES)</label>
-                            <input type="number" class="form-control bg-secondary text-light border-0" placeholder="100" min="10" required>
+                            <input type="number" id="amount" class="form-control bg-secondary text-light border-0" placeholder="100" min="10" required>
                         </div>
-                        <button type="submit" class="btn btn-mpesa w-100 py-2">Trigger STK Push</button>
+                        <button type="submit" id="submitBtn" class="btn btn-mpesa w-100 py-2">Trigger STK Push</button>
                     </form>
                 </div>
             </div>
@@ -106,10 +119,31 @@ HTML_DASHBOARD = """
                 alert("Task completed! KES " + reward + " added to your balance.");
             }
         }
-        document.getElementById('mpesaForm').addEventListener('submit', function(e) {
+
+        document.getElementById('mpesaForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            alert("M-Pesa STK Push prompt sent to your phone!");
-            bootstrap.Modal.getInstance(document.getElementById('mpesaModal')).hide();
+            const phone = document.getElementById('phone').value;
+            const amount = document.getElementById('amount').value;
+            const btn = document.getElementById('submitBtn');
+
+            btn.innerText = "Sending STK Push...";
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/stk-push', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: phone, amount: amount })
+                });
+                const data = await response.json();
+                alert(data.message || "STK Push request processed!");
+                bootstrap.Modal.getInstance(document.getElementById('mpesaModal')).hide();
+            } catch (err) {
+                alert("Error connecting to payment server.");
+            } finally {
+                btn.innerText = "Trigger STK Push";
+                btn.disabled = false;
+            }
         });
     </script>
 </body>
@@ -119,6 +153,67 @@ HTML_DASHBOARD = """
 @app.route('/')
 def home():
     return render_template_string(HTML_DASHBOARD)
+
+@app.route('/stk-push', methods=['POST'])
+def stk_push():
+    data = request.get_json()
+    phone = data.get('phone')
+    amount = data.get('amount')
+
+    # Format phone number (ensure it starts with 254)
+    if phone.startswith('0'):
+        phone = '254' + phone[1:]
+
+    # 1. Get Access Token
+    auth_url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials'
+    try:
+        r = requests.get(auth_url, auth=HTTPBasicAuth(CONSUMER_KEY, CONSUMER_SECRET))
+        access_token = r.json().get('access_token')
+    except Exception as e:
+        return jsonify({'message': 'Failed to connect to Daraja API'}), 500
+
+    if not access_token:
+        return jsonify({'message': 'Invalid Daraja API Credentials'}), 400
+
+    # 2. Prepare STK Push Request
+    stk_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest'
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    password_str = BUSINESS_SHORTCODE + PASSKEY + timestamp
+    encoded_password = base64.b64encode(password_str.encode()).decode('utf-8')
+
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+
+    payload = {
+        "BusinessShortCode": BUSINESS_SHORTCODE,
+        "Password": encoded_password,
+        "Timestamp": timestamp,
+        "TransactionType": "CustomerPayBillOnline",
+        "Amount": amount,
+        "PartyA": phone,
+        "PartyB": BUSINESS_SHORTCODE,
+        "PhoneNumber": phone,
+        "CallBackURL": "https://beast-survey-app.onrender.com/callback",
+        "AccountReference": "BeastTasks",
+        "TransactionDesc": "Deposit to Beast Tasks"
+    }
+
+    res = requests.post(stk_url, json=payload, headers=headers)
+    res_data = res.json()
+
+    if res_data.get('ResponseCode') == '0':
+        return jsonify({'message': 'STK Push sent successfully! Check your phone for the M-Pesa prompt.'})
+    else:
+        return jsonify({'message': f"STK Push Error: {res_data.get('errorMessage', 'Unknown error')}"})
+
+@app.route('/callback', methods=['POST'])
+def mpesa_callback():
+    # Safaricom calls this URL when the user enters their PIN or cancels
+    callback_data = request.get_json()
+    print("M-Pesa Callback Response:", callback_data)
+    return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
