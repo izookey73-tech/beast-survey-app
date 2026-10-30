@@ -7,7 +7,6 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
-app = Flask(__name__)
 
 # --- ADD THE HOME ROUTE HERE ---
 @app.route('/')
