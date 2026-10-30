@@ -1,7 +1,3 @@
-@app.route('/')
-def home():
-    return "<h1>Beast Online Tasks Platform is Live!</h1><p>API status: Running 24/7</p>"
-    
 import base64
 import datetime
 import os
@@ -11,6 +7,12 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
+app = Flask(__name__)
+
+# --- ADD THE HOME ROUTE HERE ---
+@app.route('/')
+def home():
+    return "<h1>Beast Online Tasks Platform is Live and Running 24/7!</h1>"
 
 # ==========================================
 # CONFIGURATION & DATABASE SETUP
