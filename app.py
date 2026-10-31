@@ -9,8 +9,9 @@ from requests.auth import HTTPBasicAuth
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'beast_secret_key_123')
+app.secret_key = os.environ.get('SECRET_KEY', 'beast_knox_ultra_secure_key_999')
 
+# Security Headers & Hardened Knox Cookie Configuration
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
@@ -33,7 +34,8 @@ def init_db():
             balance REAL DEFAULT 0.00,
             tasks_done INTEGER DEFAULT 0,
             total_earned REAL DEFAULT 0.00,
-            is_verified INTEGER DEFAULT 0
+            referred_by TEXT DEFAULT '',
+            referrals_count INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
@@ -100,21 +102,23 @@ HTML_PAGE = """
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: sans-serif; padding-bottom: 50px; }
+        body { background-color: #0f172a; color: #f8fafc; font-family: sans-serif; padding-bottom: 50px; user-select: none; }
         .card-custom { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; }
         .btn-mpesa { background-color: #22c55e; color: white; font-weight: bold; }
         .btn-withdraw { background-color: #0284c7; color: white; font-weight: bold; }
         .badge-simple { background-color: #0ea5e9; }
         .badge-medium { background-color: #eab308; color: #000; }
         .badge-complex { background-color: #ef4444; }
+        .knox-shield { border: 1px solid #22c55e; background: rgba(34, 197, 94, 0.1); border-radius: 8px; padding: 8px; }
     </style>
 </head>
 <body>
 <div class="container mt-4" style="max-width: 500px;">
     <div class="text-center mb-4">
-        <h2 class="text-success fw-bold"><i class="bi bi-shield-check me-2"></i>Beast Tasks</h2>
-        <p class="text-secondary small">Verified Global Surveys • 7 KES Each • Max 10/Day</p>
-        <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none mb-2"><i class="bi bi-download me-1"></i> Install App</button>
+        <h2 class="text-success fw-bold"><i class="bi bi-shield-lock-fill me-2"></i>Beast Tasks</h2>
+        <div class="knox-shield d-inline-block text-success small mb-2"><i class="bi bi-cpu-fill me-1"></i> Knox Shield Security Active</div>
+        <p class="text-secondary small">Verified Global Surveys • 7 KES Each • 20 KES / Invite</p>
+        <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none mb-2"><i class="bi bi-download me-1"></i> Install Android App</button>
     </div>
 
     {% if not session.get('user_id') %}
@@ -156,13 +160,17 @@ HTML_PAGE = """
                             <input type="text" name="id_number" class="form-control bg-secondary text-light border-0" placeholder="Enter ID Number" required>
                         </div>
                         <div class="mb-3">
+                            <label class="form-label">Invited By (Optional Referral ID)</label>
+                            <input type="text" name="ref" value="{{ ref_id }}" class="form-control bg-secondary text-light border-0" placeholder="BEAST-XXXXXX">
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Password</label>
                             <input type="password" name="password" class="form-control bg-secondary text-light border-0" required>
                         </div>
                         <div class="alert alert-secondary py-2 small text-center text-light mb-3">
-                            <i class="bi bi-patch-check-fill text-info me-1"></i> Requires Email, Phone & ID Verification
+                            <i class="bi bi-shield-check text-success me-1"></i> Registration Fee: KES 150 (Non-dashboard fee)
                         </div>
-                        <button type="submit" class="btn btn-primary w-100">Register & Verify</button>
+                        <button type="submit" class="btn btn-primary w-100">Register & Verify Account</button>
                     </form>
                 </div>
             </div>
@@ -171,28 +179,43 @@ HTML_PAGE = """
         <div class="card card-custom p-4 text-center mb-4">
             <div class="mb-2">
                 <span class="badge bg-secondary">ID: {{ user[0] }}</span>
-                <span class="badge bg-success"><i class="bi bi-shield-fill-check"></i> Verified Account</span>
+                <span class="badge bg-success"><i class="bi bi-shield-fill-check"></i> Knox Protected</span>
             </div>
             <h4 class="text-uppercase fw-bold text-light">{{ user[1] }}</h4>
             <p class="text-secondary small mb-1">Available Earned Balance</p>
             <h1 class="text-success fw-bold">KES <span id="balanceDisplay">{{ "%.2f"|format(user[6]) }}</span></h1>
             
+            <!-- Protected Sensitive Info Card -->
             <div class="text-start bg-dark p-2 rounded small text-secondary mb-3 border border-secondary">
-                <div><i class="bi bi-envelope-check text-success me-1"></i> Email: <b>{{ user[3] }}</b></div>
-                <div><i class="bi bi-phone text-success me-1"></i> Phone: <b>{{ user[2] }}</b></div>
-                <div><i class="bi bi-card-heading text-success me-1"></i> National ID: <b>{{ user[4] }}</b></div>
+                <div><i class="bi bi-envelope-check text-success me-1"></i> Email: <b>{{ masked_email }}</b></div>
+                <div><i class="bi bi-phone text-success me-1"></i> Phone: <b>{{ masked_phone }}</b></div>
+                <div><i class="bi bi-card-heading text-success me-1"></i> National ID: <b>{{ masked_id }}</b></div>
             </div>
 
             <div class="row mt-2 text-center">
-                <div class="col-6 border-end border-secondary">
+                <div class="col-4 border-end border-secondary">
                     <span class="text-info fw-bold fs-5" id="tasksCount">{{ user[7] }}</span>/10
-                    <div class="text-secondary small">Surveys Today</div>
+                    <div class="text-secondary small">Surveys</div>
                 </div>
-                <div class="col-6">
+                <div class="col-4 border-end border-secondary">
+                    <span class="text-primary fw-bold fs-5">{{ user[10] }}</span>
+                    <div class="text-secondary small">Invites</div>
+                </div>
+                <div class="col-4">
                     <span class="text-warning fw-bold fs-5">KES {{ "%.2f"|format(user[8]) }}</span>
                     <div class="text-secondary small">Total Earned</div>
                 </div>
             </div>
+            
+            <!-- Invite Link Section -->
+            <div class="mt-3 p-2 bg-dark rounded border border-success">
+                <small class="text-success fw-bold d-block mb-1"><i class="bi bi-person-plus-fill me-1"></i> Invite Friends & Earn KES 20.00 / Invite</small>
+                <div class="input-group input-group-sm">
+                    <input type="text" id="refLink" class="form-control bg-secondary text-light border-0" value="{{ request.host_url }}?ref={{ user[0] }}" readonly>
+                    <button class="btn btn-success" onclick="copyRefLink()"><i class="bi bi-copy"></i> Copy</button>
+                </div>
+            </div>
+
             <hr class="border-secondary my-3">
             <div class="d-flex gap-2">
                 <button class="btn btn-mpesa w-50" data-bs-toggle="modal" data-bs-target="#depositModal"><i class="bi bi-wallet2 me-1"></i> Deposit</button>
@@ -262,7 +285,7 @@ HTML_PAGE = """
                     <div class="modal-body">
                         <form id="withdrawForm">
                             <div class="mb-3">
-                                <label class="form-label">M-Pesa Phone Number (Verified)</label>
+                                <label class="form-label">M-Pesa Phone Number</label>
                                 <input type="tel" id="witPhone" value="{{ user[2] }}" class="form-control bg-secondary text-light border-0" readonly required>
                             </div>
                             <div class="mb-3">
@@ -303,6 +326,14 @@ HTML_PAGE = """
         });
     }
 
+    function copyRefLink() {
+        const copyText = document.getElementById("refLink");
+        copyText.select();
+        copyText.setSelectionRange(0, 99999);
+        navigator.clipboard.writeText(copyText.value);
+        alert("🎉 Referral link copied! Share with friends to earn KES 20.00 per registration.");
+    }
+
     async function runSurvey(survey) {
         let correctCount = 0;
         let totalQ = survey.questions.length;
@@ -324,12 +355,12 @@ HTML_PAGE = """
             if(data.success) {
                 document.getElementById('balanceDisplay').innerText = data.new_balance.toFixed(2);
                 document.getElementById('tasksCount').innerText = data.tasks_done;
-                alert("🎉 Global survey completed accurately! KES 7.00 added to your account balance.");
+                alert("🎉 Global survey completed accurately! KES 7.00 added to your balance.");
             } else {
                 alert(data.message);
             }
         } else {
-            alert("❌ Survey incomplete or inaccurate! Payment is only made when all " + totalQ + " questions are answered correctly (" + correctCount + "/" + totalQ + " correct). Try again!");
+            alert("❌ Survey incomplete or inaccurate! Payment is only made when all " + totalQ + " questions are answered correctly. Try again!");
         }
     }
 
@@ -396,6 +427,21 @@ HTML_PAGE = """
 </html>
 """
 
+# App Store & TWA Digital Asset Link Verification
+@app.route('/.well-known/assetlinks.json')
+def assetlinks():
+    assetlinks_data = [{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.beasttasks.app",
+            "sha256_cert_fingerprints": [
+                "10:20:30:40:50:60:70:80:90:A0:B0:C0:D0:E0:F0:10:20:30:40:50:60:70:80:90:A0:B0:C0:D0:E0:F0:10:20"
+            ]
+        }
+    }]
+    return jsonify(assetlinks_data)
+
 @app.route('/manifest.json')
 def manifest():
     manifest_data = {
@@ -419,15 +465,36 @@ def service_worker():
 
 @app.route('/')
 def home():
+    ref_id = request.args.get('ref', '')
     user_id = session.get('user_id')
     user = None
+    masked_email = ""
+    masked_phone = ""
+    masked_id = ""
+
     if user_id:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id, name, phone, email, id_number, password, balance, tasks_done, total_earned FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id, name, phone, email, id_number, password, balance, tasks_done, total_earned, referred_by, referrals_count FROM users WHERE user_id = ?", (user_id,))
         user = cursor.fetchone()
         conn.close()
-    return render_template_string(HTML_PAGE, user=user, surveys=SURVEYS)
+
+        if user:
+            # Knox Masking Logic for Data Leaks
+            e_parts = user[3].split('@')
+            masked_email = e_parts[0][:2] + "****@" + e_parts[1] if len(e_parts) == 2 else "***@***.com"
+            masked_phone = user[2][:4] + "****" + user[2][-2:]
+            masked_id = "***" + user[4][-4:] if len(user[4]) >= 4 else "****"
+
+    return render_template_string(
+        HTML_PAGE, 
+        user=user, 
+        surveys=SURVEYS, 
+        ref_id=ref_id,
+        masked_email=masked_email,
+        masked_phone=masked_phone,
+        masked_id=masked_id
+    )
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -436,6 +503,7 @@ def register():
     phone = request.form.get('phone')
     id_number = request.form.get('id_number')
     password = request.form.get('password')
+    ref_by = request.form.get('ref', '').strip()
 
     if phone.startswith('0'):
         phone = '254' + phone[1:]
@@ -446,10 +514,25 @@ def register():
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
+        
+        # Insert new user with balance 0.00 (registration fee separate)
         cursor.execute("""
-            INSERT INTO users (user_id, name, phone, email, id_number, password, balance, total_earned, is_verified) 
-            VALUES (?, ?, ?, ?, ?, ?, 0.00, 0.00, 1)
-        """, (user_id, name, phone, email, id_number, hashed_password))
+            INSERT INTO users (user_id, name, phone, email, id_number, password, balance, total_earned, referred_by) 
+            VALUES (?, ?, ?, ?, ?, ?, 0.00, 0.00, ?)
+        """, (user_id, name, phone, email, id_number, hashed_password, ref_by))
+        
+        # Pay 20 KES referral bonus to the inviter if referral code is valid
+        if ref_by:
+            cursor.execute("SELECT balance, total_earned, referrals_count FROM users WHERE user_id = ?", (ref_by,))
+            inviter = cursor.fetchone()
+            if inviter:
+                new_inv_balance = inviter[0] + 20.0
+                new_inv_total = inviter[1] + 20.0
+                new_inv_count = inviter[2] + 1
+                cursor.execute("""
+                    UPDATE users SET balance = ?, total_earned = ?, referrals_count = ? WHERE user_id = ?
+                """, (new_inv_balance, new_inv_total, new_inv_count, ref_by))
+
         conn.commit()
         conn.close()
         session['user_id'] = user_id
@@ -545,7 +628,7 @@ def withdraw():
 
     return jsonify({
         'success': True, 
-        'message': f'Withdrawal request for KES {amount:.2f} submitted successfully! Funds will be sent to your verified M-Pesa phone number.', 
+        'message': f'Withdrawal request for KES {amount:.2f} submitted successfully! Funds will be sent to your M-Pesa.', 
         'new_balance': new_balance
     })
 
