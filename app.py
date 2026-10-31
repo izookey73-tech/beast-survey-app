@@ -11,7 +11,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'beast_secret_key_123')
 
-# Security Cookie Settings
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
@@ -28,10 +27,13 @@ def init_db():
             user_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             phone TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            id_number TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             balance REAL DEFAULT 0.00,
             tasks_done INTEGER DEFAULT 0,
-            total_earned REAL DEFAULT 0.00
+            total_earned REAL DEFAULT 0.00,
+            is_verified INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
@@ -39,7 +41,6 @@ def init_db():
 
 init_db()
 
-# Global Questions Bank
 SURVEYS = [
     {
         "id": 1,
@@ -111,9 +112,9 @@ HTML_PAGE = """
 <body>
 <div class="container mt-4" style="max-width: 500px;">
     <div class="text-center mb-4">
-        <h2 class="text-success fw-bold"><i class="bi bi-shield-lock-fill me-2"></i>Beast Tasks</h2>
-        <p class="text-secondary small">Global Surveys • 7 KES Each • Max 10/Day</p>
-        <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none mb-2"><i class="bi bi-download me-1"></i> Install Beast Tasks App</button>
+        <h2 class="text-success fw-bold"><i class="bi bi-shield-check me-2"></i>Beast Tasks</h2>
+        <p class="text-secondary small">Verified Global Surveys • 7 KES Each • Max 10/Day</p>
+        <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none mb-2"><i class="bi bi-download me-1"></i> Install App</button>
     </div>
 
     {% if not session.get('user_id') %}
@@ -126,8 +127,8 @@ HTML_PAGE = """
                 <div class="tab-pane fade show active" id="login">
                     <form action="/login" method="POST">
                         <div class="mb-3">
-                            <label class="form-label">Phone or User ID</label>
-                            <input type="text" name="identifier" class="form-control bg-secondary text-light border-0" placeholder="2547... or BEAST-XXXXXX" required>
+                            <label class="form-label">Phone, Email or User ID</label>
+                            <input type="text" name="identifier" class="form-control bg-secondary text-light border-0" placeholder="Phone, email or BEAST-XXXXXX" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Password</label>
@@ -143,34 +144,52 @@ HTML_PAGE = """
                             <input type="text" name="name" class="form-control bg-secondary text-light border-0" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">M-Pesa Phone</label>
+                            <label class="form-label">Email Address</label>
+                            <input type="email" name="email" class="form-control bg-secondary text-light border-0" placeholder="user@example.com" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">M-Pesa Phone Number</label>
                             <input type="tel" name="phone" class="form-control bg-secondary text-light border-0" placeholder="254712345678" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">National ID Number</label>
+                            <input type="text" name="id_number" class="form-control bg-secondary text-light border-0" placeholder="Enter ID Number" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Password</label>
                             <input type="password" name="password" class="form-control bg-secondary text-light border-0" required>
                         </div>
                         <div class="alert alert-secondary py-2 small text-center text-light mb-3">
-                            <i class="bi bi-info-circle me-1"></i> Registration Fee: KES 150 (Non-dashboard fee)
+                            <i class="bi bi-patch-check-fill text-info me-1"></i> Requires Email, Phone & ID Verification
                         </div>
-                        <button type="submit" class="btn btn-primary w-100">Register Account</button>
+                        <button type="submit" class="btn btn-primary w-100">Register & Verify</button>
                     </form>
                 </div>
             </div>
         </div>
     {% else %}
         <div class="card card-custom p-4 text-center mb-4">
-            <span class="badge bg-secondary mb-1">ID: {{ user[0] }}</span>
+            <div class="mb-2">
+                <span class="badge bg-secondary">ID: {{ user[0] }}</span>
+                <span class="badge bg-success"><i class="bi bi-shield-fill-check"></i> Verified Account</span>
+            </div>
             <h4 class="text-uppercase fw-bold text-light">{{ user[1] }}</h4>
             <p class="text-secondary small mb-1">Available Earned Balance</p>
-            <h1 class="text-success fw-bold">KES <span id="balanceDisplay">{{ "%.2f"|format(user[4]) }}</span></h1>
-            <div class="row mt-3 text-center">
+            <h1 class="text-success fw-bold">KES <span id="balanceDisplay">{{ "%.2f"|format(user[6]) }}</span></h1>
+            
+            <div class="text-start bg-dark p-2 rounded small text-secondary mb-3 border border-secondary">
+                <div><i class="bi bi-envelope-check text-success me-1"></i> Email: <b>{{ user[3] }}</b></div>
+                <div><i class="bi bi-phone text-success me-1"></i> Phone: <b>{{ user[2] }}</b></div>
+                <div><i class="bi bi-card-heading text-success me-1"></i> National ID: <b>{{ user[4] }}</b></div>
+            </div>
+
+            <div class="row mt-2 text-center">
                 <div class="col-6 border-end border-secondary">
-                    <span class="text-info fw-bold fs-5" id="tasksCount">{{ user[5] }}</span>/10
+                    <span class="text-info fw-bold fs-5" id="tasksCount">{{ user[7] }}</span>/10
                     <div class="text-secondary small">Surveys Today</div>
                 </div>
                 <div class="col-6">
-                    <span class="text-warning fw-bold fs-5">KES {{ "%.2f"|format(user[6]) }}</span>
+                    <span class="text-warning fw-bold fs-5">KES {{ "%.2f"|format(user[8]) }}</span>
                     <div class="text-secondary small">Total Earned</div>
                 </div>
             </div>
@@ -243,8 +262,8 @@ HTML_PAGE = """
                     <div class="modal-body">
                         <form id="withdrawForm">
                             <div class="mb-3">
-                                <label class="form-label">M-Pesa Phone Number</label>
-                                <input type="tel" id="witPhone" value="{{ user[2] }}" class="form-control bg-secondary text-light border-0" required>
+                                <label class="form-label">M-Pesa Phone Number (Verified)</label>
+                                <input type="tel" id="witPhone" value="{{ user[2] }}" class="form-control bg-secondary text-light border-0" readonly required>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Amount to Withdraw (KES)</label>
@@ -261,7 +280,6 @@ HTML_PAGE = """
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // PWA Service Worker Registration & Installation Prompt
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js');
     }
@@ -279,9 +297,7 @@ HTML_PAGE = """
             if (deferredPrompt) {
                 deferredPrompt.prompt();
                 const { outcome } = await deferredPrompt.userChoice;
-                if (outcome === 'accepted') {
-                    installBtn.classList.add('d-none');
-                }
+                if (outcome === 'accepted') { installBtn.classList.add('d-none'); }
                 deferredPrompt = null;
             }
         });
@@ -295,10 +311,7 @@ HTML_PAGE = """
             let qObj = survey.questions[i];
             let userAnswer = prompt(`[${survey.title}] Question ${i+1} of ${totalQ}:\n\n${qObj.q}\n\nType 'yes' or 'no':`);
             if(userAnswer === null) return; 
-            
-            if(userAnswer.toLowerCase().trim() === qObj.a) {
-                correctCount++;
-            }
+            if(userAnswer.toLowerCase().trim() === qObj.a) { correctCount++; }
         }
 
         if(correctCount === totalQ) {
@@ -383,7 +396,6 @@ HTML_PAGE = """
 </html>
 """
 
-# PWA Endpoints
 @app.route('/manifest.json')
 def manifest():
     manifest_data = {
@@ -403,8 +415,7 @@ def manifest():
 
 @app.route('/sw.js')
 def service_worker():
-    sw_code = "self.addEventListener('fetch', function(event) {});"
-    return Response(sw_code, mimetype='application/javascript')
+    return Response("self.addEventListener('fetch', function(event) {});", mimetype='application/javascript')
 
 @app.route('/')
 def home():
@@ -413,7 +424,7 @@ def home():
     if user_id:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id, name, phone, password, balance, tasks_done, total_earned FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id, name, phone, email, id_number, password, balance, tasks_done, total_earned FROM users WHERE user_id = ?", (user_id,))
         user = cursor.fetchone()
         conn.close()
     return render_template_string(HTML_PAGE, user=user, surveys=SURVEYS)
@@ -421,22 +432,29 @@ def home():
 @app.route('/register', methods=['POST'])
 def register():
     name = request.form.get('name')
+    email = request.form.get('email')
     phone = request.form.get('phone')
+    id_number = request.form.get('id_number')
     password = request.form.get('password')
+
     if phone.startswith('0'):
         phone = '254' + phone[1:]
     
     hashed_password = generate_password_hash(password)
     user_id = f"BEAST-{random.randint(100000, 999999)}"
+    
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO users (user_id, name, phone, password, balance, total_earned) VALUES (?, ?, ?, ?, 0.00, 0.00)", (user_id, name, phone, hashed_password))
+        cursor.execute("""
+            INSERT INTO users (user_id, name, phone, email, id_number, password, balance, total_earned, is_verified) 
+            VALUES (?, ?, ?, ?, ?, ?, 0.00, 0.00, 1)
+        """, (user_id, name, phone, email, id_number, hashed_password))
         conn.commit()
         conn.close()
         session['user_id'] = user_id
-    except Exception:
-        return "<script>alert('Phone number already registered!'); window.location='/';</script>"
+    except sqlite3.IntegrityError:
+        return "<script>alert('Error: Phone number, Email, or National ID is already registered!'); window.location='/';</script>"
     return redirect(url_for('home'))
 
 @app.route('/login', methods=['POST'])
@@ -448,18 +466,17 @@ def login():
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, password FROM users WHERE phone = ? OR user_id = ?", (identifier, identifier))
+    cursor.execute("SELECT user_id, password FROM users WHERE phone = ? OR email = ? OR user_id = ?", (identifier, identifier, identifier))
     row = cursor.fetchone()
     conn.close()
 
     if row:
         stored_password = row[1]
-        # Check both hashed and plain text for backward compatibility
         if check_password_hash(stored_password, password) or stored_password == password:
             session['user_id'] = row[0]
             return redirect(url_for('home'))
             
-    return "<script>alert('Invalid credentials!'); window.location='/';</script>"
+    return "<script>alert('Invalid login credentials!'); window.location='/';</script>"
 
 @app.route('/logout')
 def logout():
@@ -528,7 +545,7 @@ def withdraw():
 
     return jsonify({
         'success': True, 
-        'message': f'Withdrawal request for KES {amount:.2f} submitted successfully! Funds will be sent to your M-Pesa.', 
+        'message': f'Withdrawal request for KES {amount:.2f} submitted successfully! Funds will be sent to your verified M-Pesa phone number.', 
         'new_balance': new_balance
     })
 
@@ -577,4 +594,3 @@ def callback():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
