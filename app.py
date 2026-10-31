@@ -11,7 +11,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'beast_knox_ultra_secure_key_999')
 
-# Security Headers & Hardened Knox Cookie Configuration
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
@@ -35,7 +34,8 @@ def init_db():
             tasks_done INTEGER DEFAULT 0,
             total_earned REAL DEFAULT 0.00,
             referred_by TEXT DEFAULT '',
-            referrals_count INTEGER DEFAULT 0
+            referrals_count INTEGER DEFAULT 0,
+            is_paid INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
@@ -117,8 +117,7 @@ HTML_PAGE = """
     <div class="text-center mb-4">
         <h2 class="text-success fw-bold"><i class="bi bi-shield-lock-fill me-2"></i>Beast Tasks</h2>
         <div class="knox-shield d-inline-block text-success small mb-2"><i class="bi bi-cpu-fill me-1"></i> Knox Shield Security Active</div>
-        <p class="text-secondary small">Verified Global Surveys • 7 KES Each • 20 KES / Invite</p>
-        <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none mb-2"><i class="bi bi-download me-1"></i> Install Android App</button>
+        <p class="text-secondary small">Registration Fee: KES 150 • 7 KES/Survey • 20 KES/Invite</p>
     </div>
 
     {% if not session.get('user_id') %}
@@ -167,25 +166,43 @@ HTML_PAGE = """
                             <label class="form-label">Password</label>
                             <input type="password" name="password" class="form-control bg-secondary text-light border-0" required>
                         </div>
-                        <div class="alert alert-secondary py-2 small text-center text-light mb-3">
-                            <i class="bi bi-shield-check text-success me-1"></i> Registration Fee: KES 150 (Non-dashboard fee)
+                        <div class="alert alert-warning py-2 small text-center mb-3">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i> Activation requires a one-time KES 150 fee.
                         </div>
-                        <button type="submit" class="btn btn-primary w-100">Register & Verify Account</button>
+                        <button type="submit" class="btn btn-primary w-100">Proceed to Activation</button>
                     </form>
                 </div>
             </div>
         </div>
+    {% elif user[11] == 0 %}
+        <!-- REGISTRATION FEE PAYMENT GATE -->
+        <div class="card card-custom p-4 text-center">
+            <h4 class="text-warning fw-bold mb-2"><i class="bi bi-wallet2"></i> Account Activation Required</h4>
+            <p class="text-secondary small mb-3">To unlock your dashboard, surveys, and referral links, please pay the one-time activation fee of **KES 150**.</p>
+            
+            <div class="bg-dark p-3 rounded mb-3 text-start border border-secondary">
+                <label class="form-label small text-secondary">M-Pesa Phone Number</label>
+                <input type="tel" id="regPhone" value="{{ user[2] }}" class="form-control bg-secondary text-light border-0 mb-3" required>
+                <button onclick="payRegFee()" id="payFeeBtn" class="btn btn-mpesa w-100 mb-2"><i class="bi bi-phone-vibrate me-1"></i> Pay KES 150 via STK Push</button>
+                <button onclick="simulateActivation()" class="btn btn-outline-info w-100 btn-sm"><i class="bi bi-lightning-charge me-1"></i> Simulate Instant Activation (Testing)</button>
+            </div>
+            <a href="/logout" class="btn btn-outline-danger btn-sm w-100">Sign Out</a>
+        </div>
     {% else %}
+        <!-- FULL DASHBOARD -->
+        <div class="text-center mb-3">
+            <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none w-100 mb-2 py-2 fw-bold"><i class="bi bi-download me-1"></i> Install Android App</button>
+        </div>
+
         <div class="card card-custom p-4 text-center mb-4">
             <div class="mb-2">
                 <span class="badge bg-secondary">ID: {{ user[0] }}</span>
-                <span class="badge bg-success"><i class="bi bi-shield-fill-check"></i> Knox Protected</span>
+                <span class="badge bg-success"><i class="bi bi-shield-fill-check"></i> Activated Account</span>
             </div>
             <h4 class="text-uppercase fw-bold text-light">{{ user[1] }}</h4>
             <p class="text-secondary small mb-1">Available Earned Balance</p>
             <h1 class="text-success fw-bold">KES <span id="balanceDisplay">{{ "%.2f"|format(user[6]) }}</span></h1>
             
-            <!-- Protected Sensitive Info Card -->
             <div class="text-start bg-dark p-2 rounded small text-secondary mb-3 border border-secondary">
                 <div><i class="bi bi-envelope-check text-success me-1"></i> Email: <b>{{ masked_email }}</b></div>
                 <div><i class="bi bi-phone text-success me-1"></i> Phone: <b>{{ masked_phone }}</b></div>
@@ -207,7 +224,6 @@ HTML_PAGE = """
                 </div>
             </div>
             
-            <!-- Invite Link Section -->
             <div class="mt-3 p-2 bg-dark rounded border border-success">
                 <small class="text-success fw-bold d-block mb-1"><i class="bi bi-person-plus-fill me-1"></i> Invite Friends & Earn KES 20.00 / Invite</small>
                 <div class="input-group input-group-sm">
@@ -326,6 +342,39 @@ HTML_PAGE = """
         });
     }
 
+    async function payRegFee() {
+        const btn = document.getElementById('payFeeBtn');
+        btn.innerText = "Sending STK Push...";
+        btn.disabled = true;
+        try {
+            let res = await fetch('/stk-push', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    phone: document.getElementById('regPhone').value,
+                    amount: "150"
+                })
+            });
+            let data = await res.json();
+            alert(data.message);
+        } catch(err) {
+            alert("STK Push request failed");
+        } finally {
+            btn.innerText = "Pay KES 150 via STK Push";
+            btn.disabled = false;
+        }
+    }
+
+    async function simulateActivation() {
+        let res = await fetch('/simulate-activation', { method: 'POST' });
+        let data = await res.json();
+        if(data.success) {
+            window.location.reload();
+        } else {
+            alert("Activation error");
+        }
+    }
+
     function copyRefLink() {
         const copyText = document.getElementById("refLink");
         copyText.select();
@@ -427,7 +476,6 @@ HTML_PAGE = """
 </html>
 """
 
-# App Store & TWA Digital Asset Link Verification
 @app.route('/.well-known/assetlinks.json')
 def assetlinks():
     assetlinks_data = [{
@@ -475,12 +523,11 @@ def home():
     if user_id:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id, name, phone, email, id_number, password, balance, tasks_done, total_earned, referred_by, referrals_count FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id, name, phone, email, id_number, password, balance, tasks_done, total_earned, referred_by, referrals_count, is_paid FROM users WHERE user_id = ?", (user_id,))
         user = cursor.fetchone()
         conn.close()
 
         if user:
-            # Knox Masking Logic for Data Leaks
             e_parts = user[3].split('@')
             masked_email = e_parts[0][:2] + "****@" + e_parts[1] if len(e_parts) == 2 else "***@***.com"
             masked_phone = user[2][:4] + "****" + user[2][-2:]
@@ -515,30 +562,49 @@ def register():
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         
-        # Insert new user with balance 0.00 (registration fee separate)
+        # New users start with is_paid = 0 until they pay the KES 150 fee
         cursor.execute("""
-            INSERT INTO users (user_id, name, phone, email, id_number, password, balance, total_earned, referred_by) 
-            VALUES (?, ?, ?, ?, ?, ?, 0.00, 0.00, ?)
+            INSERT INTO users (user_id, name, phone, email, id_number, password, balance, total_earned, referred_by, is_paid) 
+            VALUES (?, ?, ?, ?, ?, ?, 0.00, 0.00, ?, 0)
         """, (user_id, name, phone, email, id_number, hashed_password, ref_by))
         
-        # Pay 20 KES referral bonus to the inviter if referral code is valid
-        if ref_by:
-            cursor.execute("SELECT balance, total_earned, referrals_count FROM users WHERE user_id = ?", (ref_by,))
-            inviter = cursor.fetchone()
-            if inviter:
-                new_inv_balance = inviter[0] + 20.0
-                new_inv_total = inviter[1] + 20.0
-                new_inv_count = inviter[2] + 1
-                cursor.execute("""
-                    UPDATE users SET balance = ?, total_earned = ?, referrals_count = ? WHERE user_id = ?
-                """, (new_inv_balance, new_inv_total, new_inv_count, ref_by))
-
         conn.commit()
         conn.close()
         session['user_id'] = user_id
     except sqlite3.IntegrityError:
         return "<script>alert('Error: Phone number, Email, or National ID is already registered!'); window.location='/';</script>"
     return redirect(url_for('home'))
+
+@app.route('/simulate-activation', methods=['POST'])
+def simulate_activation():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'success': False}), 401
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT referred_by FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    ref_by = row[0] if row else ''
+
+    # Mark user as paid
+    cursor.execute("UPDATE users SET is_paid = 1 WHERE user_id = ?", (user_id,))
+
+    # Pay referral bonus of KES 20 to the inviter if referral code is valid
+    if ref_by:
+        cursor.execute("SELECT balance, total_earned, referrals_count FROM users WHERE user_id = ?", (ref_by,))
+        inviter = cursor.fetchone()
+        if inviter:
+            new_inv_balance = inviter[0] + 20.0
+            new_inv_total = inviter[1] + 20.0
+            new_inv_count = inviter[2] + 1
+            cursor.execute("""
+                UPDATE users SET balance = ?, total_earned = ?, referrals_count = ? WHERE user_id = ?
+            """, (new_inv_balance, new_inv_total, new_inv_count, ref_by))
+
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -576,14 +642,14 @@ def complete_task():
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT balance, tasks_done, total_earned FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT balance, tasks_done, total_earned, is_paid FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
 
-    if not row:
+    if not row or row[3] == 0:
         conn.close()
-        return jsonify({'success': False, 'message': 'User not found'})
+        return jsonify({'success': False, 'message': 'Account not activated'})
 
-    balance, tasks_done, total_earned = row
+    balance, tasks_done, total_earned, _ = row
 
     if tasks_done >= 10:
         conn.close()
@@ -614,12 +680,12 @@ def withdraw():
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT balance, is_paid FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
 
-    if not row or row[0] < amount:
+    if not row or row[1] == 0 or row[0] < amount:
         conn.close()
-        return jsonify({'success': False, 'message': 'Insufficient account balance!'})
+        return jsonify({'success': False, 'message': 'Insufficient account balance or account not active!'})
 
     new_balance = row[0] - amount
     cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, user_id))
@@ -636,7 +702,7 @@ def withdraw():
 def stk_push():
     data = request.get_json() or {}
     phone = data.get('phone', '')
-    amount = data.get('amount', '100')
+    amount = data.get('amount', '150')
     if phone.startswith('0'):
         phone = '254' + phone[1:]
 
@@ -660,7 +726,7 @@ def stk_push():
             "PhoneNumber": phone,
             "CallBackURL": "https://beast-survey-app.onrender.com/callback",
             "AccountReference": session.get('user_id', 'BEAST'),
-            "TransactionDesc": "Deposit"
+            "TransactionDesc": "Registration Fee"
         }, headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}, timeout=10)
 
         res_data = res.json()
