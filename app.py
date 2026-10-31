@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, jsonify, request, session, redirect, url_for
+from flask import Flask, render_template_string, jsonify, request, session, redirect, url_for, Response
 import sqlite3
 import random
 import base64
@@ -6,9 +6,17 @@ import datetime
 import os
 import requests
 from requests.auth import HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'beast_secret_key_123')
+
+# Security Cookie Settings
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+)
 
 DB_FILE = 'users.db'
 
@@ -31,7 +39,7 @@ def init_db():
 
 init_db()
 
-# Worldwide / Global Questions Bank (1-7 questions per survey)
+# Global Questions Bank
 SURVEYS = [
     {
         "id": 1,
@@ -86,6 +94,8 @@ HTML_PAGE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Beast Online Tasks</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#22c55e">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
@@ -101,8 +111,9 @@ HTML_PAGE = """
 <body>
 <div class="container mt-4" style="max-width: 500px;">
     <div class="text-center mb-4">
-        <h2 class="text-success fw-bold"><i class="bi bi-globe2 me-2"></i>Beast Tasks</h2>
+        <h2 class="text-success fw-bold"><i class="bi bi-shield-lock-fill me-2"></i>Beast Tasks</h2>
         <p class="text-secondary small">Global Surveys • 7 KES Each • Max 10/Day</p>
+        <button id="installAppBtn" class="btn btn-outline-success btn-sm d-none mb-2"><i class="bi bi-download me-1"></i> Install Beast Tasks App</button>
     </div>
 
     {% if not session.get('user_id') %}
@@ -250,6 +261,32 @@ HTML_PAGE = """
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    // PWA Service Worker Registration & Installation Prompt
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js');
+    }
+
+    let deferredPrompt;
+    const installBtn = document.getElementById('installAppBtn');
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        if(installBtn) installBtn.classList.remove('d-none');
+    });
+
+    if(installBtn) {
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    installBtn.classList.add('d-none');
+                }
+                deferredPrompt = null;
+            }
+        });
+    }
+
     async function runSurvey(survey) {
         let correctCount = 0;
         let totalQ = survey.questions.length;
@@ -346,6 +383,29 @@ HTML_PAGE = """
 </html>
 """
 
+# PWA Endpoints
+@app.route('/manifest.json')
+def manifest():
+    manifest_data = {
+        "name": "Beast Online Tasks",
+        "short_name": "BeastTasks",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#22c55e",
+        "icons": [{
+            "src": "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }]
+    }
+    return jsonify(manifest_data)
+
+@app.route('/sw.js')
+def service_worker():
+    sw_code = "self.addEventListener('fetch', function(event) {});"
+    return Response(sw_code, mimetype='application/javascript')
+
 @app.route('/')
 def home():
     user_id = session.get('user_id')
@@ -366,12 +426,12 @@ def register():
     if phone.startswith('0'):
         phone = '254' + phone[1:]
     
+    hashed_password = generate_password_hash(password)
     user_id = f"BEAST-{random.randint(100000, 999999)}"
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        # Starting balance is 0.00 KES (Registration fee is separate)
-        cursor.execute("INSERT INTO users (user_id, name, phone, password, balance, total_earned) VALUES (?, ?, ?, ?, 0.00, 0.00)", (user_id, name, phone, password))
+        cursor.execute("INSERT INTO users (user_id, name, phone, password, balance, total_earned) VALUES (?, ?, ?, ?, 0.00, 0.00)", (user_id, name, phone, hashed_password))
         conn.commit()
         conn.close()
         session['user_id'] = user_id
@@ -392,9 +452,13 @@ def login():
     row = cursor.fetchone()
     conn.close()
 
-    if row and row[1] == password:
-        session['user_id'] = row[0]
-        return redirect(url_for('home'))
+    if row:
+        stored_password = row[1]
+        # Check both hashed and plain text for backward compatibility
+        if check_password_hash(stored_password, password) or stored_password == password:
+            session['user_id'] = row[0]
+            return redirect(url_for('home'))
+            
     return "<script>alert('Invalid credentials!'); window.location='/';</script>"
 
 @app.route('/logout')
@@ -408,7 +472,7 @@ def complete_task():
     if not user_id:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
 
-    reward = 7.0  # 7 KES per survey
+    reward = 7.0
 
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -513,3 +577,4 @@ def callback():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
